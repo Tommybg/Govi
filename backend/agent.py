@@ -13,7 +13,8 @@ from livekit import rtc
 from livekit.agents import (
     AutoSubscribe,
     JobContext,
-    WorkerOptions,
+    WorkerOptions, 
+    cli,
     llm,
 )
 from livekit.agents.multimodal import MultimodalAgent
@@ -48,10 +49,10 @@ async def start_worker():
         logger.info("Starting worker...")
         
         worker_options = WorkerOptions(
-            entrypoint_fnc=entrypoint,
+            entrypoint_fnc=entrypoint
         )
         
-        await worker_options.run()
+        await cli.run_app(worker_options)
         logger.info("Worker started successfully")
         
     except Exception as e:

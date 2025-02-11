@@ -1,20 +1,12 @@
 services:
   - type: web
-    name: govi-frontend
+    name: govi-front
     env: node
-    buildCommand: >
-      NODE_ENV=development pnpm install -D tailwindcss@3.4.1 postcss@latest autoprefixer@latest @tailwindcss/postcss@latest && 
-      NODE_ENV=development pnpm install --frozen-lockfile && 
-      NODE_ENV=production pnpm run build
-    startCommand: pnpm run start
+    buildCommand: pnpm install && pnpm run build
+    startCommand: pnpm start
     envVars:
+      - key: NODE_ENV
+        value: production
       - key: PORT
-        value: 10000
-      - key: NEXT_PUBLIC_API_URL
-        value: https://govi.onrender.com
-      - key: NEXT_PUBLIC_WEBSOCKET_URL
-        value: wss://govi.onrender.com
-    disk:
-      name: next-cache
-      mountPath: /opt/render/project/src/govi_front/.next/cache
-      sizeGB: 1
+        value: 3000
+    autoDeploy: true

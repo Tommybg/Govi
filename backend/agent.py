@@ -49,9 +49,6 @@ async def start_worker():
         
         worker_options = WorkerOptions(
             entrypoint_fnc=entrypoint,
-            livekit_url=os.getenv("LIVEKIT_URL"),
-            api_key=os.getenv("LIVEKIT_API_KEY"),
-            api_secret=os.getenv("LIVEKIT_API_SECRET"),
         )
         
         await worker_options.run()

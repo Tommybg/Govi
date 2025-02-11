@@ -22,6 +22,7 @@ export default function Page() {
     ConnectionDetails | undefined
   >(undefined);
   const [agentState, setAgentState] = useState<AgentState>("disconnected");
+  const [agentStatus, setAgentStatus] = useState(null);
 
   const onConnectButtonClicked = useCallback(async () => {
     // Generate room connection details, including:
@@ -41,6 +42,23 @@ export default function Page() {
     const response = await fetch(url.toString());
     const connectionDetailsData = await response.json();
     updateConnectionDetails(connectionDetailsData);
+  }, []);
+
+  const startAgent = async () => {
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/start-agent`, {
+        method: 'GET',
+      });
+      const data = await response.json();
+      console.log(data);
+      setAgentStatus(data.status);
+    } catch (error) {
+      console.error("Error starting agent:", error);
+    }
+  };
+
+  useEffect(() => {
+    startAgent();
   }, []);
 
   return (
@@ -65,6 +83,8 @@ export default function Page() {
         <RoomAudioRenderer />
         <NoAgentNotification state={agentState} />
       </LiveKitRoom>
+      <h1>Agent Status: {agentStatus}</h1>
+      <button onClick={startAgent}>Start Agent</button>
     </main>
   );
 }

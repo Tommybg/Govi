@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware 
 from fastapi.responses import JSONResponse
@@ -18,10 +19,29 @@ from livekit.agents import (
 from livekit.agents.multimodal import MultimodalAgent
 from livekit.plugins import openai
 
+# Enhanced logging configuration
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("govi-agent")
+
+# Load environment variables first
+load_dotenv(dotenv_path=".env.local")
+
+# Verify environment variables
+required_vars = ['LIVEKIT_URL', 'LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET', 'OPENAI_API_KEY']
+for var in required_vars:
+    value = os.getenv(var)
+    if not value:
+        logger.error(f"Missing required environment variable: {var}")
+    else:
+        logger.info(f"Found {var}: {value[:4]}{'*' * (len(value)-4)}")  # Log first 4 chars only
+
 # Create FastAPI app
 app = FastAPI()
 
-## CORS configuration
+# CORS configuration
 allowed_origins = [
     "https://govi-front.onrender.com",
     "http://localhost:3000",
@@ -49,38 +69,36 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
+    """Health check endpoint with environment validation"""
+    env_status = {var: bool(os.getenv(var)) for var in required_vars}
     return JSONResponse({
         "status": "healthy",
         "service": "Govi Backend API",
-        "timestamp": datetime.datetime.now().isoformat()
+        "timestamp": datetime.now().isoformat(),
+        "environment_status": env_status
     })
 
-load_dotenv(dotenv_path=".env.local")
-logger = logging.getLogger("my-worker")
-logger.setLevel(logging.INFO)
-
-# Add a health check endpoint
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy"}
-
 async def entrypoint(ctx: JobContext):
-    logger.info(f"connecting to room {ctx.room.name}")
-    await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+    try:
+        logger.info(f"Connecting to room {ctx.room.name}")
+        await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+        logger.info("Successfully connected to room")
 
-    participant = await ctx.wait_for_participant()
+        logger.info("Waiting for participant...")
+        participant = await ctx.wait_for_participant()
+        logger.info(f"Participant joined: {participant.identity}")
 
-    run_multimodal_agent(ctx, participant)
-
-    logger.info("agent started")
-
+        run_multimodal_agent(ctx, participant)
+        logger.info("Agent started successfully")
+    except Exception as e:
+        logger.error(f"Error in entrypoint: {str(e)}", exc_info=True)
+        raise
 
 def run_multimodal_agent(ctx: JobContext, participant: rtc.RemoteParticipant):
-    logger.info("starting multimodal agent")
-
-    model = openai.realtime.RealtimeModel(
-        instructions= """
+    try:
+        logger.info("Initializing multimodal agent")
+        model = openai.realtime.RealtimeModel(
+            instructions= """
             Eres Govi, la asistente de IA conversacional del GovLab con capacidad de voz en tiempo real. Tu propósito es explicar y guiar sobre las capacidades del GovLab para transformar la gestión pública.
 
             DEFINICIÓN DEL GOVLAB:
@@ -205,45 +223,62 @@ def run_multimodal_agent(ctx: JobContext, participant: rtc.RemoteParticipant):
             - Automatización de procesos
             - Innovación en servicios públicos
 """,
-        voice="sage",
-        temperature=0.6, 
-        model="gpt-4o-mini-realtime-preview",
-        turn_detection=openai.realtime.ServerVadOptions(
-            threshold=0.6, 
-            prefix_padding_ms=200, 
-            silence_duration_ms=500, 
-            create_response=True
-        ) 
-    )
-    agent = MultimodalAgent(model=model)
-    agent.start(ctx.room, participant)
-
-    session = model.sessions[0]
-    session.conversation.item.create(
-        llm.ChatMessage(
-            role="assistant",
-            content="Please begin the interaction with the user in a manner consistent with your instructions.",
+            voice="sage",
+            temperature=0.6, 
+            model="gpt-4o-mini-realtime-preview",
+            turn_detection=openai.realtime.ServerVadOptions(
+                threshold=0.6, 
+                prefix_padding_ms=200, 
+                silence_duration_ms=500, 
+                create_response=True
+            ) 
         )
-    )
-    session.response.create()
+        logger.info("RealtimeModel initialized successfully")
 
-# Add an endpoint to start the worker
+        agent = MultimodalAgent(model=model)
+        agent.start(ctx.room, participant)
+        logger.info("MultimodalAgent started successfully")
+
+        session = model.sessions[0]
+        session.conversation.item.create(
+            llm.ChatMessage(
+                role="assistant",
+                content="¡Hola! Soy Govi, y trabajo con el GovLab. ¿Veamos como puedo ayudarte hoy?",
+            )
+        )
+        session.response.create()
+        logger.info("Initial conversation created")
+    except Exception as e:
+        logger.error(f"Error in run_multimodal_agent: {str(e)}", exc_info=True)
+        raise
+
 @app.post("/start-worker")
 async def start_worker():
+    """Endpoint to start the LiveKit worker"""
     try:
+        logger.info("Starting worker...")
         await cli.run_app(
             WorkerOptions(
                 entrypoint_fnc=entrypoint,
             )
         )
-        return {"status": "worker started"}
+        return {"status": "worker started successfully"}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-# Keep the main block for direct script execution
-if __name__ == "__main__":
-    cli.run_app(
-        WorkerOptions(
-            entrypoint_fnc=entrypoint,
+        error_msg = f"Error starting worker: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": error_msg}
         )
-    )
+
+if __name__ == "__main__":
+    try:
+        logger.info("Starting application...")
+        cli.run_app(
+            WorkerOptions(
+                entrypoint_fnc=entrypoint,
+            )
+        )
+    except Exception as e:
+        logger.error(f"Fatal error in main: {str(e)}", exc_info=True)
+        raise

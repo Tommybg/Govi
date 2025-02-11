@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import logging
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv
+from fastapi.middleware.cors import CORSMiddleware 
+from fastapi.responses import JSONResponse
+from dotenv import load_dotenv 
+from datetime import datetime
 
 from livekit import rtc
 from livekit.agents import (
@@ -19,14 +21,40 @@ from livekit.plugins import openai
 # Create FastAPI app
 app = FastAPI()
 
-# Add CORS middleware
+## CORS configuration
+allowed_origins = [
+    "https://govi-front.onrender.com",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://govi-front.onrender.com"],  # In production, replace with your frontend URL
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"]
 )
+
+@app.get("/")
+async def root():
+    """Root endpoint that provides API information"""
+    return JSONResponse({
+        "status": "online",
+        "version": "1.0",
+        "service": "Govi Backend API",
+        "health_check": "/health"
+    })
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return JSONResponse({
+        "status": "healthy",
+        "service": "Govi Backend API",
+        "timestamp": datetime.datetime.now().isoformat()
+    })
 
 load_dotenv(dotenv_path=".env.local")
 logger = logging.getLogger("my-worker")

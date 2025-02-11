@@ -317,5 +317,9 @@ async def agent_status():
         )
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
+    # Use cli.run_app for both local development and deployment
+    cli.run_app(
+        WorkerOptions(
+            entrypoint_fnc=entrypoint,
+        )
+    )

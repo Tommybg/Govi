@@ -235,39 +235,6 @@ def run_multimodal_agent(ctx: JobContext, participant: rtc.RemoteParticipant):
         logger.error(f"Error in run_multimodal_agent: {str(e)}", exc_info=True)
         raise
 
-@app.on_event("startup")
-async def startup_event():
-    """Start the worker when the FastAPI application starts"""
-    global worker_task
-    logger.info("Starting worker on application startup")
-    try:
-        # Instead of running cli.run_app directly, we'll just initialize the worker
-        worker_task = asyncio.create_task(
-            entrypoint(
-                JobContext(
-                    url=os.getenv('LIVEKIT_URL'),
-                    api_key=os.getenv('LIVEKIT_API_KEY'),
-                    api_secret=os.getenv('LIVEKIT_API_SECRET'),
-                )
-            )
-        )
-        logger.info("Worker task created successfully")
-    except Exception as e:
-        logger.error(f"Error starting worker on startup: {str(e)}", exc_info=True)
-        raise
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Clean up worker task on shutdown"""
-    global worker_task
-    if worker_task:
-        logger.info("Cancelling worker task")
-        worker_task.cancel()
-        try:
-            await worker_task
-        except asyncio.CancelledError:
-            logger.info("Worker task cancelled successfully")
-
 @app.get("/")
 async def root():
     """Root endpoint that provides API information"""
@@ -281,17 +248,43 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint with environment and worker validation"""
+    """Health check endpoint with environment validation"""
     env_status = {var: bool(os.getenv(var)) for var in required_vars}
-    worker_status = "running" if worker_task and not worker_task.done() else "not running"
     
     return JSONResponse({
         "status": "healthy",
         "service": "Govi Backend API",
         "timestamp": datetime.now().isoformat(),
         "environment_status": env_status,
-        "worker_status": worker_status
     })
+
+@app.get("/start-agent")
+async def start_agent():
+    """Endpoint to manually start the LiveKit agent"""
+    try:
+        job_context = JobContext(
+            url=os.getenv('LIVEKIT_URL'),
+            api_key=os.getenv('LIVEKIT_API_KEY'),
+            api_secret=os.getenv('LIVEKIT_API_SECRET'),
+        )
+        
+        # Start the entrypoint in a background task
+        task = asyncio.create_task(entrypoint(job_context))
+        
+        return JSONResponse({
+            "status": "success",
+            "message": "Agent started successfully",
+            "timestamp": datetime.now().isoformat()
+        })
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "message": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+        )
 
 @app.get("/agent/status")
 async def agent_status():

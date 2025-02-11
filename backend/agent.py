@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import logging
 import os
-from fastapi import FastAPI, Depends
+import asyncio
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware 
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv 
 from datetime import datetime
-import asyncio
-from contextlib import asynccontextmanager
 
 from livekit import rtc
 from livekit.agents import (
@@ -38,11 +37,12 @@ for var in required_vars:
     if not value:
         logger.error(f"Missing required environment variable: {var}")
     else:
-        logger.info(f"Found {var}: {value[:4]}{'*' * (len(value)-4)}")  # Log first 4 chars only
+        logger.info(f"Found {var}: {value[:4]}{'*' * (len(value)-4)}")
 
 # Create FastAPI app
 app = FastAPI()
 
+# Global variable to track worker task
 worker_task = None
 
 # CORS configuration
@@ -60,42 +60,6 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"]
 )
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Lifespan event handler for startup and shutdown."""
-    global worker_task
-    logger.info("Starting worker on application startup")
-    try:
-        worker_task = asyncio.create_task(
-            cli.run_app(
-                WorkerOptions(
-                    entrypoint_fnc=entrypoint,
-                )
-            )
-        )
-        logger.info("Worker task created successfully")
-        yield  # This allows the application to run
-    finally:
-        if worker_task:
-            logger.info("Cancelling worker task")
-            worker_task.cancel()
-            try:
-                await worker_task
-            except asyncio.CancelledError:
-                logger.info("Worker task cancelled successfully")
-
-app.add_event_handler("lifespan", lifespan)
-
-@app.get("/")
-async def root():
-    """Root endpoint that provides API information"""
-    return JSONResponse({
-        "status": "online",
-        "version": "1.0",
-        "service": "Govi Backend API",
-        "health_check": "/health"
-    })
 
 async def entrypoint(ctx: JobContext):
     try:
@@ -262,7 +226,7 @@ def run_multimodal_agent(ctx: JobContext, participant: rtc.RemoteParticipant):
         session.conversation.item.create(
             llm.ChatMessage(
                 role="assistant",
-                content="¡Hola! Soy Govi, y trabajo con el GovLab. ¿Veamos como puedo ayudarte hoy?",
+                content="¡Hola! Soy Govi, tu asistente del GovLab. ¿En qué puedo ayudarte hoy?",
             )
         )
         session.response.create()
@@ -270,6 +234,47 @@ def run_multimodal_agent(ctx: JobContext, participant: rtc.RemoteParticipant):
     except Exception as e:
         logger.error(f"Error in run_multimodal_agent: {str(e)}", exc_info=True)
         raise
+
+@app.on_event("startup")
+async def startup_event():
+    """Start the worker when the FastAPI application starts"""
+    global worker_task
+    logger.info("Starting worker on application startup")
+    try:
+        worker_task = asyncio.create_task(
+            cli.run_app(
+                WorkerOptions(
+                    entrypoint_fnc=entrypoint,
+                )
+            )
+        )
+        logger.info("Worker task created successfully")
+    except Exception as e:
+        logger.error(f"Error starting worker on startup: {str(e)}", exc_info=True)
+        raise
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean up worker task on shutdown"""
+    global worker_task
+    if worker_task:
+        logger.info("Cancelling worker task")
+        worker_task.cancel()
+        try:
+            await worker_task
+        except asyncio.CancelledError:
+            logger.info("Worker task cancelled successfully")
+
+@app.get("/")
+async def root():
+    """Root endpoint that provides API information"""
+    return JSONResponse({
+        "status": "online",
+        "version": "1.0",
+        "service": "Govi Backend API",
+        "health_check": "/health",
+        "worker_status": "running" if worker_task and not worker_task.done() else "not running"
+    })
 
 @app.get("/health")
 async def health_check():
@@ -285,22 +290,32 @@ async def health_check():
         "worker_status": worker_status
     })
 
-@app.get("/worker/status")
-async def worker_status():
-    """Check worker status"""
-    return JSONResponse({
-        "status": "running" if worker_task and not worker_task.done() else "not running",
-        "error": str(worker_task.exception()) if worker_task and worker_task.done() and worker_task.exception() else None
-    })
+@app.get("/agent/status")
+async def agent_status():
+    """Check detailed status of the LiveKit agent"""
+    try:
+        status = {
+            "worker_running": worker_task is not None and not worker_task.done(),
+            "timestamp": datetime.now().isoformat(),
+            "environment_ready": all(os.getenv(var) for var in required_vars),
+        }
+        
+        if worker_task and worker_task.done():
+            exception = worker_task.exception()
+            if exception:
+                status["error"] = str(exception)
+            
+        return JSONResponse(status)
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "message": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+        )
 
 if __name__ == "__main__":
-    try:
-        logger.info("Starting application...")
-        cli.run_app(
-            WorkerOptions(
-                entrypoint_fnc=entrypoint,
-            )
-        )
-    except Exception as e:
-        logger.error(f"Fatal error in main: {str(e)}", exc_info=True)
-        raise
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))

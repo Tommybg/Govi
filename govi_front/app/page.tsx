@@ -51,7 +51,6 @@ export default function Page() {
       });
       const data = await response.json();
       console.log(data);
-      setAgentStatus(data.status);
     } catch (error) {
       console.error("Error starting agent:", error);
     }

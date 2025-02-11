@@ -47,29 +47,46 @@ worker_task: asyncio.Task | None = None
 async def lifespan(app: FastAPI):
     global worker_task
 
-    # Startup logic
+    # Validate and load environment variables
+    livekit_host = os.getenv("LIVEKIT_URL")  # Ensure this is correct
+    livekit_api_key = os.getenv("LIVEKIT_API_KEY")
+    livekit_api_secret = os.getenv("LIVEKIT_API_SECRET")
+
+    if not (livekit_host and livekit_api_key and livekit_api_secret):
+        logger.error("Missing required environment variables for LiveKit.")
+        yield  # Allow FastAPI to start but with a warning
+        return
+
+    # Log worker start
     if worker_task is None or worker_task.done():
         try:
-            logger.info("Starting worker...")
+            logger.info("Starting worker with JobContext...")
+
+            # Correcting JobContext instantiation
             job_context = JobContext(
-                url=os.getenv("LIVEKIT_URL"),
-                api_key=os.getenv("LIVEKIT_API_KEY"),
-                api_secret=os.getenv("LIVEKIT_API_SECRET"),
+                host=livekit_host,  # Check if it requires 'host' instead of 'url'
+                api_key=livekit_api_key,
+                api_secret=livekit_api_secret,
             )
+
             worker_task = asyncio.create_task(entrypoint(job_context))
-            logger.info("Worker started successfully")
+            logger.info("Worker started successfully.")
+
+        except TypeError as e:
+            logger.error(f"JobContext instantiation failed: {e}", exc_info=True)
+
         except Exception as e:
             logger.error(f"Failed to start worker: {e}", exc_info=True)
 
-    yield  # Let app run
+    yield  # Run FastAPI
 
-    # Shutdown logic
+    # Shutdown handling
     if worker_task and not worker_task.done():
         worker_task.cancel()
         try:
             await worker_task
         except asyncio.CancelledError:
-            logger.info("Worker task cancelled")
+            logger.info("Worker task cancelled successfully.")
 
 # Create FastAPI app
 app = FastAPI(lifespan=lifespan)

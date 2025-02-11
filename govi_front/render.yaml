@@ -3,9 +3,9 @@ services:
     name: govi-frontend
     env: node
     buildCommand: >
-      pnpm install -D tailwindcss@latest postcss@latest autoprefixer@latest && 
-      pnpm install --frozen-lockfile && 
-      pnpm run build
+      NODE_ENV=development pnpm install -D tailwindcss@latest postcss@latest autoprefixer@latest && 
+      NODE_ENV=development pnpm install --frozen-lockfile && 
+      NODE_ENV=production pnpm run build
     startCommand: pnpm run start
     envVars:
       - key: NODE_ENV

@@ -241,10 +241,13 @@ async def startup_event():
     global worker_task
     logger.info("Starting worker on application startup")
     try:
+        # Instead of running cli.run_app directly, we'll just initialize the worker
         worker_task = asyncio.create_task(
-            cli.run_app(
-                WorkerOptions(
-                    entrypoint_fnc=entrypoint,
+            entrypoint(
+                JobContext(
+                    url=os.getenv('LIVEKIT_URL'),
+                    api_key=os.getenv('LIVEKIT_API_KEY'),
+                    api_secret=os.getenv('LIVEKIT_API_SECRET'),
                 )
             )
         )
@@ -317,7 +320,7 @@ async def agent_status():
         )
 
 if __name__ == "__main__":
-    # Use cli.run_app for both local development and deployment
+    # This part is for local development only
     cli.run_app(
         WorkerOptions(
             entrypoint_fnc=entrypoint,

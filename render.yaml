@@ -19,8 +19,12 @@ services:
   - type: web
     name: govi-frontend
     env: node
-    buildCommand: pnpm install -D tailwindcss@latest postcss@latest autoprefixer@latest && pnpm install --frozen-lockfile && pnpm run build
-    startCommand: pnpm run start
+    buildCommand: >
+      cd frontend && 
+      pnpm install -D tailwindcss@latest postcss@latest autoprefixer@latest && 
+      pnpm install --frozen-lockfile && 
+      pnpm run build
+    startCommand: cd frontend && pnpm run start
     envVars:
       - key: NODE_ENV
         value: production

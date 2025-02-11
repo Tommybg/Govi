@@ -83,8 +83,6 @@ export default function Page() {
         <RoomAudioRenderer />
         <NoAgentNotification state={agentState} />
       </LiveKitRoom>
-      <h1>Agent Status: {agentStatus}</h1>
-      <button onClick={startAgent}>Start Agent</button>
     </main>
   );
 }

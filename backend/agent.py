@@ -48,13 +48,13 @@ async def lifespan(app: FastAPI):
     global worker_task
 
     # Validate and load environment variables
-    livekit_host = os.getenv("LIVEKIT_URL")  # Ensure this is correct
+    livekit_url = os.getenv("LIVEKIT_URL")
     livekit_api_key = os.getenv("LIVEKIT_API_KEY")
     livekit_api_secret = os.getenv("LIVEKIT_API_SECRET")
 
-    if not (livekit_host and livekit_api_key and livekit_api_secret):
+    if not (livekit_url and livekit_api_key and livekit_api_secret):
         logger.error("Missing required environment variables for LiveKit.")
-        yield  # Allow FastAPI to start but with a warning
+        yield
         return
 
     # Log worker start
@@ -62,9 +62,9 @@ async def lifespan(app: FastAPI):
         try:
             logger.info("Starting worker with JobContext...")
 
-            # Correcting JobContext instantiation
+            # Fixed JobContext instantiation - using 'url' instead of 'host'
             job_context = JobContext(
-                host=livekit_host,  # Check if it requires 'host' instead of 'url'
+                url=livekit_url,
                 api_key=livekit_api_key,
                 api_secret=livekit_api_secret,
             )
@@ -72,13 +72,10 @@ async def lifespan(app: FastAPI):
             worker_task = asyncio.create_task(entrypoint(job_context))
             logger.info("Worker started successfully.")
 
-        except TypeError as e:
-            logger.error(f"JobContext instantiation failed: {e}", exc_info=True)
-
         except Exception as e:
             logger.error(f"Failed to start worker: {e}", exc_info=True)
 
-    yield  # Run FastAPI
+    yield
 
     # Shutdown handling
     if worker_task and not worker_task.done():
@@ -134,7 +131,6 @@ async def start_agent():
     """Endpoint to manually start the LiveKit agent"""
     global worker_task
     
-    # Check if worker is already running
     if worker_task and not worker_task.done():
         return JSONResponse({
             "status": "already_running",
@@ -143,16 +139,15 @@ async def start_agent():
         })
 
     try:
+        # Fixed JobContext instantiation here as well
         job_context = JobContext(
             url=os.getenv('LIVEKIT_URL'),
             api_key=os.getenv('LIVEKIT_API_KEY'),
             api_secret=os.getenv('LIVEKIT_API_SECRET'),
         )
         
-        # Create and store the worker task globally
         worker_task = asyncio.create_task(entrypoint(job_context))
         
-        # Add task completion callback
         def on_task_complete(task):
             try:
                 task.result()

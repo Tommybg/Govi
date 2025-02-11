@@ -131,52 +131,104 @@ async def root():
 
 @app.get("/start-agent")
 async def start_agent():
-    """Manually start the agent (if not already running)"""
+    """Endpoint to manually start the LiveKit agent"""
     global worker_task
+    
+    # Check if worker is already running
     if worker_task and not worker_task.done():
-        return JSONResponse({"status": "already running", "timestamp": datetime.now().isoformat()})
+        return JSONResponse({
+            "status": "already_running",
+            "message": "Agent is already running",
+            "timestamp": datetime.now().isoformat()
+        })
 
     try:
         job_context = JobContext(
-            url=os.getenv("LIVEKIT_URL"),
-            api_key=os.getenv("LIVEKIT_API_KEY"),
-            api_secret=os.getenv("LIVEKIT_API_SECRET"),
+            url=os.getenv('LIVEKIT_URL'),
+            api_key=os.getenv('LIVEKIT_API_KEY'),
+            api_secret=os.getenv('LIVEKIT_API_SECRET'),
         )
+        
+        # Create and store the worker task globally
         worker_task = asyncio.create_task(entrypoint(job_context))
-        return JSONResponse({"status": "success", "message": "Agent started successfully"})
+        
+        # Add task completion callback
+        def on_task_complete(task):
+            try:
+                task.result()
+            except Exception as e:
+                logger.error(f"Worker task failed: {str(e)}", exc_info=True)
+                
+        worker_task.add_done_callback(on_task_complete)
+        
+        return JSONResponse({
+            "status": "success",
+            "message": "Agent started successfully",
+            "timestamp": datetime.now().isoformat()
+        })
     except Exception as e:
-        return JSONResponse({"status": "error", "message": str(e)})
+        logger.error(f"Failed to start agent: {str(e)}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "message": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+        )
 
 @app.get("/agent/status")
 async def agent_status():
-    """Detailed agent status check"""
+    """Check the current status of the agent"""
     global worker_task
+    
     status = {
-        "worker_running": worker_task is not None and not worker_task.done(),
+        "is_running": worker_task is not None and not worker_task.done(),
         "timestamp": datetime.now().isoformat(),
-        "environment_ready": all(os.getenv(var) for var in required_vars),
+        "environment_ready": all(os.getenv(var) for var in required_vars)
     }
     
     if worker_task and worker_task.done():
-        exception = worker_task.exception()
-        if exception:
-            status["error"] = str(exception)
+        try:
+            exception = worker_task.exception()
+            if exception:
+                status["error"] = str(exception)
+        except asyncio.InvalidStateError:
+            status["error"] = "Task state could not be retrieved"
     
     return JSONResponse(status)
 
-async def entrypoint(ctx: JobContext):
+@app.get("/stop-agent")
+async def stop_agent():
+    """Endpoint to manually stop the LiveKit agent"""
+    global worker_task
+    
+    if not worker_task:
+        return JSONResponse({
+            "status": "not_running",
+            "message": "No agent is currently running",
+            "timestamp": datetime.now().isoformat()
+        })
+    
     try:
-        logger.info(f"Connecting to room {ctx.room.name}")
-        await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
-        logger.info("Successfully connected to room")
-
-        participant = await ctx.wait_for_participant()
-        logger.info(f"Participant joined: {participant.identity}")
-
-        run_multimodal_agent(ctx, participant)
-        logger.info("Agent started successfully")
+        if not worker_task.done():
+            worker_task.cancel()
+            await asyncio.wait_for(worker_task, timeout=5.0)
+        
+        return JSONResponse({
+            "status": "success",
+            "message": "Agent stopped successfully",
+            "timestamp": datetime.now().isoformat()
+        })
     except Exception as e:
-        logger.error(f"Worker failed: {str(e)}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "message": f"Failed to stop agent: {str(e)}",
+                "timestamp": datetime.now().isoformat()
+            }
+        )
 
 @app.get("/health")
 async def health_check():

@@ -22,7 +22,6 @@ export default function Page() {
     ConnectionDetails | undefined
   >(undefined);
   const [agentState, setAgentState] = useState<AgentState>("disconnected");
-  const [agentStatus, setAgentStatus] = useState(null);
 
   const onConnectButtonClicked = useCallback(async () => {
     // Generate room connection details, including:

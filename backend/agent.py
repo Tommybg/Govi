@@ -76,6 +76,7 @@ async def entrypoint(ctx: JobContext):
         logger.error(f"Worker failed: {str(e)}", exc_info=True)
         raise
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for FastAPI application"""
@@ -109,7 +110,6 @@ app = FastAPI(lifespan=lifespan)
 allowed_origins = [
     "https://govi-front.onrender.com",
     "http://localhost:3000",
-    "http://127.0.0.1:3000",
 ]
 
 app.add_middleware(
@@ -120,6 +120,10 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],
 )
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
 
 def run_multimodal_agent(ctx: JobContext, participant: rtc.RemoteParticipant):
     """Initialize and run the multimodal agent"""
@@ -281,7 +285,21 @@ def run_multimodal_agent(ctx: JobContext, participant: rtc.RemoteParticipant):
         logger.error(f"Error in run_multimodal_agent: {str(e)}", exc_info=True)
         raise
 
-# Keep your existing API endpoints...
+
+@app.post("/start-agent")
+async def start_agent_endpoint():
+    global worker_task
+    try:
+        if worker_task is None or worker_task.done():
+            worker_task = asyncio.create_task(start_worker())
+            return {"status": "success", "message": "Agent started"}
+        return {"status": "success", "message": "Agent already running"}
+    except Exception as e:
+        logger.error(f"Failed to start agent: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": str(e)}
+        )
 
 if __name__ == "__main__":
     import uvicorn

@@ -45,11 +45,22 @@ export default function Page() {
 
   const startAgent = async () => {
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/start-agent`, {
-        method: 'GET',
+      // Log the URL being called
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+      console.log('Attempting to start agent at:', apiUrl);
+      
+      const response = await fetch(`${apiUrl}/start-agent`, {
+        method: 'POST', // Changed to POST as it modifies server state
+        headers: {
+          'Content-Type': 'application/json'
+        }
       });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
       const data = await response.json();
-      console.log(data);
+      console.log('Agent start response:', data);
     } catch (error) {
       console.error("Error starting agent:", error);
     }

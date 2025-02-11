@@ -339,4 +339,20 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    
+    # Production configuration optimized for Render
+    uvicorn_config = uvicorn.Config(
+        app=app,
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", 10000)),
+        workers=4,  # Render free tier supports up to 4 workers
+        loop="auto",
+        log_level="info",
+        proxy_headers=True,
+        forwarded_allow_ips="*",
+        timeout_keep_alive=65,
+        access_log=True
+    )
+    
+    server = uvicorn.Server(uvicorn_config)
+    server.run()

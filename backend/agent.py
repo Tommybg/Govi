@@ -14,7 +14,6 @@ from livekit.agents import (
     AutoSubscribe,
     JobContext,
     WorkerOptions,
-    cli,
     llm,
 )
 from livekit.agents.multimodal import MultimodalAgent
@@ -43,36 +42,67 @@ for var in required_vars:
 # Global worker task
 worker_task: asyncio.Task | None = None
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global worker_task
-    
+async def start_worker():
+    """Initialize and start the LiveKit worker"""
     try:
-        # Start the worker using cli.run_app
+        logger.info("Starting worker...")
+        
         worker_options = WorkerOptions(
             entrypoint_fnc=entrypoint,
+            livekit_url=os.getenv("LIVEKIT_URL"),
+            api_key=os.getenv("LIVEKIT_API_KEY"),
+            api_secret=os.getenv("LIVEKIT_API_SECRET"),
         )
         
-        if worker_task is None or worker_task.done():
-            worker_task = asyncio.create_task(
-                cli.run_app(worker_options)
-            )
-            logger.info("Worker started successfully")
-            
+        await worker_options.run()
+        logger.info("Worker started successfully")
+        
     except Exception as e:
         logger.error(f"Failed to start worker: {e}", exc_info=True)
+        raise
+
+async def entrypoint(ctx: JobContext):
+    """Worker entrypoint that handles LiveKit connection."""
+    try:
+        logger.info(f"Connecting to room {ctx.room.name}")
+        await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+        logger.info("Successfully connected to room")
         
+        # Wait for participant and start agent
+        participant = await ctx.wait_for_participant()
+        run_multimodal_agent(ctx, participant)
+        
+    except Exception as e:
+        logger.error(f"Worker failed: {str(e)}", exc_info=True)
+        raise
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for FastAPI application"""
+    global worker_task
+    
+    # Startup
+    try:
+        if worker_task is None or worker_task.done():
+            worker_task = asyncio.create_task(start_worker())
+            logger.info("Worker task created")
+    except Exception as e:
+        logger.error(f"Failed to create worker task: {e}", exc_info=True)
+    
     yield
     
-    # Cleanup
+    # Shutdown
     if worker_task and not worker_task.done():
+        logger.info("Shutting down worker task...")
         worker_task.cancel()
         try:
             await worker_task
         except asyncio.CancelledError:
-            logger.info("Worker task cancelled successfully.")
+            logger.info("Worker task cancelled successfully")
+        except Exception as e:
+            logger.error(f"Error during worker shutdown: {e}", exc_info=True)
 
-# Create FastAPI app
+# Create FastAPI app with lifespan
 app = FastAPI(lifespan=lifespan)
 
 # CORS Configuration
@@ -91,28 +121,12 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
-async def entrypoint(ctx: JobContext):
-    """Worker entrypoint that handles LiveKit connection and agent setup."""
-    try:
-        logger.info(f"Connecting to room {ctx.room.name}")
-        await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
-        logger.info("Successfully connected to room")
-        
-        # Wait for participant and start agent
-        participant = await ctx.wait_for_participant()
-        run_multimodal_agent(ctx, participant)
-        
-        logger.info("Agent started successfully")
-        
-    except Exception as e:
-        logger.error(f"Worker failed: {str(e)}", exc_info=True)
-        raise
-
 def run_multimodal_agent(ctx: JobContext, participant: rtc.RemoteParticipant):
+    """Initialize and run the multimodal agent"""
     try:
         logger.info("Initializing multimodal agent")
         model = openai.realtime.RealtimeModel(
-            instructions= """
+            instructions="""
             Eres Govi, la asistente de IA conversacional del GovLab con capacidad de voz en tiempo real. Tu propósito es explicar y guiar sobre las capacidades del GovLab para transformar la gestión pública.
 
             DEFINICIÓN DEL GOVLAB:
@@ -236,7 +250,7 @@ def run_multimodal_agent(ctx: JobContext, participant: rtc.RemoteParticipant):
             - Optimización de recursos
             - Automatización de procesos
             - Innovación en servicios públicos
-""",  # Keep your existing instructions
+""",
             voice="sage",
             temperature=0.6, 
             model="gpt-4o-mini-realtime-preview",
@@ -267,91 +281,26 @@ def run_multimodal_agent(ctx: JobContext, participant: rtc.RemoteParticipant):
         logger.error(f"Error in run_multimodal_agent: {str(e)}", exc_info=True)
         raise
 
-# Keep your existing API endpoints
-@app.get("/")
-async def root():
-    """Root API status"""
-    return JSONResponse(
-        {
-            "status": "online",
-            "version": "1.0",
-            "service": "Govi Backend API",
-            "health_check": "/health",
-            "worker_status": "running" if worker_task and not worker_task.done() else "not running",
-        }
-    )
-
-@app.get("/start-agent")
-async def start_agent():
-    """Endpoint to manually start the LiveKit agent"""
-    global worker_task
-    
-    if worker_task and not worker_task.done():
-        return JSONResponse({
-            "status": "already_running",
-            "message": "Agent is already running",
-            "timestamp": datetime.now().isoformat()
-        })
-
-    try:
-        worker_options = WorkerOptions(
-            entrypoint_fnc=entrypoint,
-        )
-        
-        worker_task = asyncio.create_task(cli.run_app(worker_options))
-        
-        def on_task_complete(task):
-            try:
-                task.result()
-            except Exception as e:
-                logger.error(f"Worker task failed: {str(e)}", exc_info=True)
-                
-        worker_task.add_done_callback(on_task_complete)
-        
-        return JSONResponse({
-            "status": "success",
-            "message": "Agent started successfully",
-            "timestamp": datetime.now().isoformat()
-        })
-        
-    except Exception as e:
-        logger.error(f"Failed to start agent: {str(e)}", exc_info=True)
-        return JSONResponse(
-            status_code=500,
-            content={
-                "status": "error",
-                "message": str(e),
-                "timestamp": datetime.now().isoformat()
-            }
-        )
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint with environment validation"""
-    env_status = {var: bool(os.getenv(var)) for var in required_vars}
-    
-    return JSONResponse({
-        "status": "healthy",
-        "service": "Govi Backend API",
-        "timestamp": datetime.now().isoformat(),
-        "environment_status": env_status,
-    })
+# Keep your existing API endpoints...
 
 if __name__ == "__main__":
     import uvicorn
     
-    # Production configuration optimized for Render
+    # Configuration optimized for Render Standard Plan (1 CPU, 2GB RAM)
     uvicorn_config = uvicorn.Config(
         app=app,
         host="0.0.0.0",
-        port=int(os.getenv("PORT", 10000)),
-        workers=4,  # Render free tier supports up to 4 workers
+        port=int(os.getenv("PORT", 8000)),
+        workers=2,
         loop="auto",
         log_level="info",
         proxy_headers=True,
         forwarded_allow_ips="*",
-        timeout_keep_alive=65,
-        access_log=True
+        timeout_keep_alive=60,
+        access_log=True,
+        limit_concurrency=50,
+        limit_max_requests=1000,
+        backlog=100
     )
     
     server = uvicorn.Server(uvicorn_config)

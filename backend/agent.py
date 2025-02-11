@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import logging
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware 
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv 
 from datetime import datetime
+import asyncio
+from contextlib import asynccontextmanager
 
 from livekit import rtc
 from livekit.agents import (
@@ -41,6 +43,8 @@ for var in required_vars:
 # Create FastAPI app
 app = FastAPI()
 
+worker_task = None
+
 # CORS configuration
 allowed_origins = [
     "https://govi-front.onrender.com",
@@ -57,6 +61,32 @@ app.add_middleware(
     expose_headers=["*"]
 )
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan event handler for startup and shutdown."""
+    global worker_task
+    logger.info("Starting worker on application startup")
+    try:
+        worker_task = asyncio.create_task(
+            cli.run_app(
+                WorkerOptions(
+                    entrypoint_fnc=entrypoint,
+                )
+            )
+        )
+        logger.info("Worker task created successfully")
+        yield  # This allows the application to run
+    finally:
+        if worker_task:
+            logger.info("Cancelling worker task")
+            worker_task.cancel()
+            try:
+                await worker_task
+            except asyncio.CancelledError:
+                logger.info("Worker task cancelled successfully")
+
+app.add_event_handler("lifespan", lifespan)
+
 @app.get("/")
 async def root():
     """Root endpoint that provides API information"""
@@ -65,17 +95,6 @@ async def root():
         "version": "1.0",
         "service": "Govi Backend API",
         "health_check": "/health"
-    })
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint with environment validation"""
-    env_status = {var: bool(os.getenv(var)) for var in required_vars}
-    return JSONResponse({
-        "status": "healthy",
-        "service": "Govi Backend API",
-        "timestamp": datetime.now().isoformat(),
-        "environment_status": env_status
     })
 
 async def entrypoint(ctx: JobContext):
@@ -252,24 +271,27 @@ def run_multimodal_agent(ctx: JobContext, participant: rtc.RemoteParticipant):
         logger.error(f"Error in run_multimodal_agent: {str(e)}", exc_info=True)
         raise
 
-@app.post("/start-worker")
-async def start_worker():
-    """Endpoint to start the LiveKit worker"""
-    try:
-        logger.info("Starting worker...")
-        await cli.run_app(
-            WorkerOptions(
-                entrypoint_fnc=entrypoint,
-            )
-        )
-        return {"status": "worker started successfully"}
-    except Exception as e:
-        error_msg = f"Error starting worker: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        return JSONResponse(
-            status_code=500,
-            content={"status": "error", "message": error_msg}
-        )
+@app.get("/health")
+async def health_check():
+    """Health check endpoint with environment and worker validation"""
+    env_status = {var: bool(os.getenv(var)) for var in required_vars}
+    worker_status = "running" if worker_task and not worker_task.done() else "not running"
+    
+    return JSONResponse({
+        "status": "healthy",
+        "service": "Govi Backend API",
+        "timestamp": datetime.now().isoformat(),
+        "environment_status": env_status,
+        "worker_status": worker_status
+    })
+
+@app.get("/worker/status")
+async def worker_status():
+    """Check worker status"""
+    return JSONResponse({
+        "status": "running" if worker_task and not worker_task.done() else "not running",
+        "error": str(worker_task.exception()) if worker_task and worker_task.done() and worker_task.exception() else None
+    })
 
 if __name__ == "__main__":
     try:

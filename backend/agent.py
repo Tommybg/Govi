@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+from contextlib import asynccontextmanager
 import logging
 import os
 import asyncio
@@ -20,18 +20,19 @@ from livekit.agents import (
 from livekit.agents.multimodal import MultimodalAgent
 from livekit.plugins import openai
 
-# Enhanced logging configuration
+# Setup logging
 logging.basicConfig(
     level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger("govi-agent")
 
-# Load environment variables first
+# Load environment variables
 load_dotenv(dotenv_path=".env.local")
 
-# Verify environment variables
-required_vars = ['LIVEKIT_URL', 'LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET', 'OPENAI_API_KEY']
+# Required environment variables
+required_vars = ["LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "OPENAI_API_KEY"]
+
 for var in required_vars:
     value = os.getenv(var)
     if not value:
@@ -39,13 +40,41 @@ for var in required_vars:
     else:
         logger.info(f"Found {var}: {value[:4]}{'*' * (len(value)-4)}")
 
+# Global worker task
+worker_task: asyncio.Task | None = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global worker_task
+
+    # Startup logic
+    if worker_task is None or worker_task.done():
+        try:
+            logger.info("Starting worker...")
+            job_context = JobContext(
+                url=os.getenv("LIVEKIT_URL"),
+                api_key=os.getenv("LIVEKIT_API_KEY"),
+                api_secret=os.getenv("LIVEKIT_API_SECRET"),
+            )
+            worker_task = asyncio.create_task(entrypoint(job_context))
+            logger.info("Worker started successfully")
+        except Exception as e:
+            logger.error(f"Failed to start worker: {e}", exc_info=True)
+
+    yield  # Let app run
+
+    # Shutdown logic
+    if worker_task and not worker_task.done():
+        worker_task.cancel()
+        try:
+            await worker_task
+        except asyncio.CancelledError:
+            logger.info("Worker task cancelled")
+
 # Create FastAPI app
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
 
-# Global variable to track worker task
-worker_task = None
-
-# CORS configuration
+# CORS Configuration
 allowed_origins = [
     "https://govi-front.onrender.com",
     "http://localhost:3000",
@@ -58,8 +87,65 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["*"]
+    expose_headers=["*"],
 )
+
+async def entrypoint(ctx: JobContext):
+    """Worker entrypoint that handles LiveKit connection."""
+    try:
+        logger.info(f"Connecting to room {ctx.room.name}")
+        await ctx.connect(auto_subscribe="audio_only")
+        logger.info("Successfully connected to room")
+    except Exception as e:
+        logger.error(f"Worker failed: {str(e)}", exc_info=True)
+
+@app.get("/")
+async def root():
+    """Root API status"""
+    return JSONResponse(
+        {
+            "status": "online",
+            "version": "1.0",
+            "service": "Govi Backend API",
+            "health_check": "/health",
+            "worker_status": "running" if worker_task and not worker_task.done() else "not running",
+        }
+    )
+
+@app.get("/start-agent")
+async def start_agent():
+    """Manually start the agent (if not already running)"""
+    global worker_task
+    if worker_task and not worker_task.done():
+        return JSONResponse({"status": "already running", "timestamp": datetime.now().isoformat()})
+
+    try:
+        job_context = JobContext(
+            url=os.getenv("LIVEKIT_URL"),
+            api_key=os.getenv("LIVEKIT_API_KEY"),
+            api_secret=os.getenv("LIVEKIT_API_SECRET"),
+        )
+        worker_task = asyncio.create_task(entrypoint(job_context))
+        return JSONResponse({"status": "success", "message": "Agent started successfully"})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)})
+
+@app.get("/agent/status")
+async def agent_status():
+    """Detailed agent status check"""
+    global worker_task
+    status = {
+        "worker_running": worker_task is not None and not worker_task.done(),
+        "timestamp": datetime.now().isoformat(),
+        "environment_ready": all(os.getenv(var) for var in required_vars),
+    }
+    
+    if worker_task and worker_task.done():
+        exception = worker_task.exception()
+        if exception:
+            status["error"] = str(exception)
+    
+    return JSONResponse(status)
 
 async def entrypoint(ctx: JobContext):
     try:
@@ -67,15 +153,25 @@ async def entrypoint(ctx: JobContext):
         await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
         logger.info("Successfully connected to room")
 
-        logger.info("Waiting for participant...")
         participant = await ctx.wait_for_participant()
         logger.info(f"Participant joined: {participant.identity}")
 
         run_multimodal_agent(ctx, participant)
         logger.info("Agent started successfully")
     except Exception as e:
-        logger.error(f"Error in entrypoint: {str(e)}", exc_info=True)
-        raise
+        logger.error(f"Worker failed: {str(e)}", exc_info=True)
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint with environment validation"""
+    env_status = {var: bool(os.getenv(var)) for var in required_vars}
+    
+    return JSONResponse({
+        "status": "healthy",
+        "service": "Govi Backend API",
+        "timestamp": datetime.now().isoformat(),
+        "environment_status": env_status,
+    })
 
 def run_multimodal_agent(ctx: JobContext, participant: rtc.RemoteParticipant):
     try:
@@ -234,83 +330,6 @@ def run_multimodal_agent(ctx: JobContext, participant: rtc.RemoteParticipant):
     except Exception as e:
         logger.error(f"Error in run_multimodal_agent: {str(e)}", exc_info=True)
         raise
-
-@app.get("/")
-async def root():
-    """Root endpoint that provides API information"""
-    return JSONResponse({
-        "status": "online",
-        "version": "1.0",
-        "service": "Govi Backend API",
-        "health_check": "/health",
-        "worker_status": "running" if worker_task and not worker_task.done() else "not running"
-    })
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint with environment validation"""
-    env_status = {var: bool(os.getenv(var)) for var in required_vars}
-    
-    return JSONResponse({
-        "status": "healthy",
-        "service": "Govi Backend API",
-        "timestamp": datetime.now().isoformat(),
-        "environment_status": env_status,
-    })
-
-@app.get("/start-agent")
-async def start_agent():
-    """Endpoint to manually start the LiveKit agent"""
-    try:
-        job_context = JobContext(
-            url=os.getenv('LIVEKIT_URL'),
-            api_key=os.getenv('LIVEKIT_API_KEY'),
-            api_secret=os.getenv('LIVEKIT_API_SECRET'),
-        )
-        
-        # Start the entrypoint in a background task
-        task = asyncio.create_task(entrypoint(job_context))
-        
-        return JSONResponse({
-            "status": "success",
-            "message": "Agent started successfully",
-            "timestamp": datetime.now().isoformat()
-        })
-    except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={
-                "status": "error",
-                "message": str(e),
-                "timestamp": datetime.now().isoformat()
-            }
-        )
-
-@app.get("/agent/status")
-async def agent_status():
-    """Check detailed status of the LiveKit agent"""
-    try:
-        status = {
-            "worker_running": worker_task is not None and not worker_task.done(),
-            "timestamp": datetime.now().isoformat(),
-            "environment_ready": all(os.getenv(var) for var in required_vars),
-        }
-        
-        if worker_task and worker_task.done():
-            exception = worker_task.exception()
-            if exception:
-                status["error"] = str(exception)
-            
-        return JSONResponse(status)
-    except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={
-                "status": "error",
-                "message": str(e),
-                "timestamp": datetime.now().isoformat()
-            }
-        )
 
 if __name__ == "__main__":
     # This part is for local development only

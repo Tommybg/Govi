@@ -29,8 +29,8 @@ export default function Page() {
       setIsConnecting(true);
       setError(null);
       
-      // Get connection details from our local API route
-      const response = await fetch('/api/connection-details');
+      // Get connection details from the backend API
+      const response = await fetch(process.env.NEXT_PUBLIC_CONN_DETAILS_ENDPOINT!);
       
       if (!response.ok) {
         const errorText = await response.text();

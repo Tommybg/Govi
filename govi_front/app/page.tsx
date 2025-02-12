@@ -30,51 +30,33 @@ export default function Page() {
   }, []);
 
   const onConnectButtonClicked = useCallback(async () => {
-    console.log("Connect button clicked");
-    if (isConnecting) {
-      console.log("Already connecting, button click ignored");
-      return;
-    }
-    
-    try {
-      setIsConnecting(true);
-      setError(null);
-      
-      const endpoint = process.env.NEXT_PUBLIC_CONN_DETAILS_ENDPOINT;
-      if (!endpoint) {
-        throw new Error('Connection endpoint not configured');
-      }
+    // Generate room connection details, including:
+    //   - A random Room name
+    //   - A random Participant name
+    //   - An Access Token to permit the participant to join the room
+    //   - The URL of the LiveKit server to connect to
+    //
+    // In real-world application, you would likely allow the user to specify their
+    // own participant name, and possibly to choose from existing rooms to join.
 
-      console.log('Fetching from endpoint:', endpoint);
-      
-      const response = await fetch(endpoint);
+    try {
+      const url = new URL(
+        process.env.NEXT_PUBLIC_CONN_DETAILS_ENDPOINT ?? "/api/connection-details",
+        window.location.origin
+      );
+      const response = await fetch(url.toString());
       
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to get connection details: ${errorText}`);
+        throw new Error('Failed to fetch connection details');
       }
-      
-      const data = await response.json();
-      
-      if (!data.serverUrl || !data.participantToken) {
-        throw new Error('Invalid connection details received');
-      }
-      
-      console.log('Connecting with details:', {
-        serverUrl: data.serverUrl,
-        roomName: data.roomName,
-        participantName: data.participantName
-      });
-      
-      setConnectionDetails(data);
-      
+
+      const connectionDetailsData = await response.json();
+      updateConnectionDetails(connectionDetailsData);
     } catch (error) {
-      console.error('Connection error:', error);
-      setError(error instanceof Error ? error.message : 'Failed to connect');
-    } finally {
-      setIsConnecting(false);
+      console.error('Error fetching connection details:', error);
+      alert('Failed to initiate connection. Please try again.');
     }
-  }, [isConnecting]);
+  }, []);
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-between p-24 bg-gradient-to-r from-blue-900 to-blue-600">

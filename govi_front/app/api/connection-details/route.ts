@@ -91,7 +91,7 @@ function createParticipantToken(
     canPublishData: true,
     canSubscribe: true,
     // Enable real-time audio processing
-    canPublishSource: {
+    canPublishSources: {
       audio: true,
       data: true
     }

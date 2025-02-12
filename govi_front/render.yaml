@@ -7,6 +7,10 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      - key: PORT
-        value: 3000
+      - key: NEXT_PUBLIC_API_URL
+        value: https://govi.onrender.com
+      - key: NEXT_PUBLIC_CONN_DETAILS_ENDPOINT
+        value: https://govi.onrender.com/api/connection-details
+      - key: NEXT_PUBLIC_WEBSOCKET_URL
+        value: wss://govi.onrender.com
     autoDeploy: true

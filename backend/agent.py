@@ -14,6 +14,7 @@ from livekit.agents import (
     WorkerOptions,
     cli,  # Important - we need this
     llm,
+    WorkerType  # Add this import
 )
 from livekit.agents.multimodal import MultimodalAgent
 from livekit.plugins import openai
@@ -222,14 +223,17 @@ async def health_check():
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
 if __name__ == "__main__":
-    import uvicorn
-    
-    # Create WorkerOptions
+    # Create WorkerOptions with proper enum value
     worker_options = WorkerOptions(
         entrypoint_fnc=entrypoint,
         agent_name="govi",
-        worker_type="ROOM"
+        worker_type=WorkerType.ROOM  # Use the enum value instead of string
     )
+    
+    # Add debug logging
+    logger.info(f"LIVEKIT_URL: {os.getenv('LIVEKIT_URL')}")
+    logger.info(f"LIVEKIT_API_KEY: {os.getenv('LIVEKIT_API_KEY', '')[:4]}***")
+    logger.info(f"LIVEKIT_API_SECRET: {os.getenv('LIVEKIT_API_SECRET', '')[:4]}***")
     
     # Run the worker using cli.run_app
     cli.run_app(worker_options)

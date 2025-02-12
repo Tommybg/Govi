@@ -30,7 +30,11 @@ export default function Page() {
   }, []);
 
   const onConnectButtonClicked = useCallback(async () => {
-    if (isConnecting) return;
+    console.log("Connect button clicked");
+    if (isConnecting) {
+      console.log("Already connecting, button click ignored");
+      return;
+    }
     
     try {
       setIsConnecting(true);

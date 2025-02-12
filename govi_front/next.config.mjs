@@ -2,10 +2,16 @@
 const nextConfig = {
     reactStrictMode: true,
     async rewrites() {
+      const endpoint = process.env.NEXT_PUBLIC_CONN_DETAILS_ENDPOINT;
+      if (!endpoint) {
+        console.warn('Warning: NEXT_PUBLIC_CONN_DETAILS_ENDPOINT is not defined');
+        return [];
+      }
+      
       return [
         {
           source: '/api/:path*',
-          destination: `${process.env.NEXT_PUBLIC_API_URL}/api/:path*`,
+          destination: `${endpoint}/api/:path*`,
         },
       ];
     },

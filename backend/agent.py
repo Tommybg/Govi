@@ -1,8 +1,6 @@
 from __future__ import annotations
-from contextlib import asynccontextmanager
 import logging
 import os
-import asyncio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware 
 from fastapi.responses import JSONResponse
@@ -13,51 +11,36 @@ from livekit import rtc
 from livekit.agents import (
     AutoSubscribe,
     JobContext,
-    WorkerOptions, 
-    cli,
+    WorkerOptions,
+    cli,  # Important - we need this
     llm,
 )
 from livekit.agents.multimodal import MultimodalAgent
 from livekit.plugins import openai
 
 # Setup logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger("govi-agent")
 
 # Load environment variables
 load_dotenv(dotenv_path=".env.local")
 
-# Required environment variables
-required_vars = ["LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "OPENAI_API_KEY"]
+# Create FastAPI app
+app = FastAPI()
 
-for var in required_vars:
-    value = os.getenv(var)
-    if not value:
-        logger.error(f"Missing required environment variable: {var}")
-    else:
-        logger.info(f"Found {var}: {value[:4]}{'*' * (len(value)-4)}")
+# CORS Configuration
+allowed_origins = [
+    "https://govi-front.onrender.com",
+    "http://localhost:3000",
+]
 
-# Global worker task
-worker_task: asyncio.Task | None = None
-
-async def start_worker():
-    """Initialize and start the LiveKit worker"""
-    try:
-        logger.info("Starting worker...")
-        
-        worker_options = WorkerOptions(
-            entrypoint_fnc=entrypoint
-        )
-        
-        await cli.run_app(worker_options)
-        logger.info("Worker started successfully")
-        
-    except Exception as e:
-        logger.error(f"Failed to start worker: {e}", exc_info=True)
-        raise
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 async def entrypoint(ctx: JobContext):
     """Worker entrypoint that handles LiveKit connection."""
@@ -74,61 +57,12 @@ async def entrypoint(ctx: JobContext):
         logger.error(f"Worker failed: {str(e)}", exc_info=True)
         raise
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Lifespan context manager for FastAPI application"""
-    global worker_task
-    
-    # Startup
-    try:
-        if worker_task is None or worker_task.done():
-            worker_task = asyncio.create_task(start_worker())
-            logger.info("Worker task created")
-    except Exception as e:
-        logger.error(f"Failed to create worker task: {e}", exc_info=True)
-    
-    yield
-    
-    # Shutdown
-    if worker_task and not worker_task.done():
-        logger.info("Shutting down worker task...")
-        worker_task.cancel()
-        try:
-            await worker_task
-        except asyncio.CancelledError:
-            logger.info("Worker task cancelled successfully")
-        except Exception as e:
-            logger.error(f"Error during worker shutdown: {e}", exc_info=True)
-
-# Create FastAPI app with lifespan
-app = FastAPI(lifespan=lifespan)
-
-# CORS Configuration
-allowed_origins = [
-    "https://govi-front.onrender.com",
-    "http://localhost:3000",
-]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-)
-
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy"}
-
 def run_multimodal_agent(ctx: JobContext, participant: rtc.RemoteParticipant):
     """Initialize and run the multimodal agent"""
     try:
         logger.info("Initializing multimodal agent")
         model = openai.realtime.RealtimeModel(
-            instructions="""
+            instructions= """
             Eres Govi, la asistente de IA conversacional del GovLab con capacidad de voz en tiempo real. Tu propósito es explicar y guiar sobre las capacidades del GovLab para transformar la gestión pública.
 
             DEFINICIÓN DEL GOVLAB:
@@ -283,41 +217,19 @@ def run_multimodal_agent(ctx: JobContext, participant: rtc.RemoteParticipant):
         logger.error(f"Error in run_multimodal_agent: {str(e)}", exc_info=True)
         raise
 
-
-@app.post("/start-agent")
-async def start_agent_endpoint():
-    global worker_task
-    try:
-        if worker_task is None or worker_task.done():
-            worker_task = asyncio.create_task(start_worker())
-            return {"status": "success", "message": "Agent started"}
-        return {"status": "success", "message": "Agent already running"}
-    except Exception as e:
-        logger.error(f"Failed to start agent: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={"status": "error", "message": str(e)}
-        )
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
 if __name__ == "__main__":
     import uvicorn
     
-    # Configuration optimized for Render Standard Plan (1 CPU, 2GB RAM)
-    uvicorn_config = uvicorn.Config(
-        app=app,
-        host="0.0.0.0",
-        port=int(os.getenv("PORT", 8000)),
-        workers=2,
-        loop="auto",
-        log_level="info",
-        proxy_headers=True,
-        forwarded_allow_ips="*",
-        timeout_keep_alive=60,
-        access_log=True,
-        limit_concurrency=50,
-        limit_max_requests=1000,
-        backlog=100
+    # Create WorkerOptions
+    worker_options = WorkerOptions(
+        entrypoint_fnc=entrypoint,
+        agent_name="govi",
+        worker_type="ROOM"
     )
     
-    server = uvicorn.Server(uvicorn_config)
-    server.run()
+    # Run the worker using cli.run_app
+    cli.run_app(worker_options)

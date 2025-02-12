@@ -17,9 +17,7 @@ import { CloseIcon } from "./components/CloseIcon";
 import { useKrispNoiseFilter } from "@livekit/components-react/krisp";
 
 export default function Page() {
-  const [connectionDetails, updateConnectionDetails] = useState<
-    ConnectionDetails | undefined
-  >(undefined);
+  const [connectionDetails, setConnectionDetails] = useState<ConnectionDetails | undefined>(undefined);
   const [agentState, setAgentState] = useState<AgentState>("disconnected");
   const [error, setError] = useState<string | null>(null);
 
@@ -27,7 +25,6 @@ export default function Page() {
     try {
       console.log('Starting connection process...');
       
-      // Use the complete URL from environment variable
       const url = process.env.NEXT_PUBLIC_CONN_DETAILS_ENDPOINT;
       
       if (!url) {
@@ -62,10 +59,10 @@ export default function Page() {
         throw new Error('Invalid connection details received');
       }
       
-      updateConnectionDetails(connectionDetailsData);
-    } catch (error) {
+      setConnectionDetails(connectionDetailsData);
+    } catch (error: any) {
       console.error('Connection error details:', error);
-      alert(`Connection failed: ${error.message}`);
+      setError(error.message || 'Failed to connect');
     }
   }, []);
 
@@ -89,15 +86,31 @@ export default function Page() {
 
       const data = await response.json();
       console.log("Agent started successfully:", data);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error starting agent:", error);
-      setError(error instanceof Error ? error.message : "Failed to start agent");
+      setError(error.message || "Failed to start agent");
     }
   }, []);
 
   useEffect(() => {
     startAgent();
   }, [startAgent]);
+
+  const handleDisconnect = useCallback(() => {
+    console.log("Disconnected from room");
+    setConnectionDetails(undefined);
+    setError(null);
+  }, []);
+
+  const handleError = useCallback((error: Error) => {
+    console.error("LiveKit error:", error);
+    setError(error.message);
+  }, []);
+
+  const handleMediaDeviceFailure = useCallback((error: Error) => {
+    console.error("Media device failure:", error);
+    setError("Failed to access microphone");
+  }, []);
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-between p-24 bg-gradient-to-r from-blue-900 to-blue-600">
@@ -107,19 +120,9 @@ export default function Page() {
         connect={connectionDetails !== undefined}
         audio={true}
         video={false}
-        onMediaDeviceFailure={(error) => {
-          console.error("Media device failure:", error);
-          setError("Failed to access microphone");
-        }}
-        onDisconnected={() => {
-          console.log("Disconnected from room");
-          updateConnectionDetails(undefined);
-          setError(null);
-        }}
-        onError={(error) => {
-          console.error("LiveKit error:", error);
-          setError(error.message);
-        }}
+        onMediaDeviceFailure={handleMediaDeviceFailure}
+        onDisconnected={handleDisconnect}
+        onError={handleError}
         className="grid grid-rows-[2fr_1fr] items-center"
       >
         <SimpleVoiceAssistant onStateChange={setAgentState} />
@@ -133,6 +136,12 @@ export default function Page() {
         {error && (
           <div className="fixed top-4 left-1/2 transform -translate-x-1/2 bg-red-500 text-white px-4 py-2 rounded-md shadow-lg">
             {error}
+            <button 
+              onClick={() => setError(null)}
+              className="ml-2 text-white hover:text-gray-200"
+            >
+              ✕
+            </button>
           </div>
         )}
       </LiveKitRoom>

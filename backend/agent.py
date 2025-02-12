@@ -7,15 +7,14 @@ from fastapi.responses import JSONResponse
 from dotenv import load_dotenv 
 from datetime import datetime
 
-from livekit import rtc
+from livekit import rtc, AccessToken
 from livekit.agents import (
     AutoSubscribe,
     JobContext,
     WorkerOptions,
     cli,  # Important - we need this
     llm,
-    WorkerType,  # Add this import
-    AccessToken  # Added AccessToken import
+    WorkerType  # Add this import
 )
 from livekit.agents.multimodal import MultimodalAgent
 from livekit.plugins import openai

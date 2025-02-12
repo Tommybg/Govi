@@ -5,11 +5,12 @@ import {
 } from "livekit-server-sdk";
 import { NextResponse } from "next/server";
 
+// NOTE: you are expected to define the following environment variables in `.env.local`:
 const API_KEY = process.env.LIVEKIT_API_KEY;
 const API_SECRET = process.env.LIVEKIT_API_SECRET;
 const LIVEKIT_URL = process.env.LIVEKIT_URL;
 
-// Don't cache results
+// don't cache the results
 export const revalidate = 0;
 
 export type ConnectionDetails = {
@@ -21,69 +22,51 @@ export type ConnectionDetails = {
 
 export async function GET() {
   try {
-    // Validate environment variables
-    if (!LIVEKIT_URL || !API_KEY || !API_SECRET) {
-      throw new Error("Missing required environment variables");
+    if (LIVEKIT_URL === undefined) {
+      throw new Error("LIVEKIT_URL is not defined");
+    }
+    if (API_KEY === undefined) {
+      throw new Error("LIVEKIT_API_KEY is not defined");
+    }
+    if (API_SECRET === undefined) {
+      throw new Error("LIVEKIT_API_SECRET is not defined");
     }
 
-    // Generate unique identifiers for room and participant
+    // Generate participant token
     const participantIdentity = `voice_assistant_user_${Math.floor(Math.random() * 10_000)}`;
     const roomName = `voice_assistant_room_${Math.floor(Math.random() * 10_000)}`;
-
-    // Create participant token with VAD metadata
     const participantToken = await createParticipantToken(
-      { 
-        identity: participantIdentity,
-        // Add metadata for server-side VAD configuration
-        metadata: JSON.stringify({
-          serverVad: {
-            threshold: 0.6,
-            speakingTimeout: 500,
-            silenceTimeout: 500,
-            create_response: true
-          }
-        })
-      },
+      { identity: participantIdentity },
       roomName,
     );
 
-    // Prepare connection details
+    // Return connection details
     const data: ConnectionDetails = {
       serverUrl: LIVEKIT_URL,
       roomName,
-      participantToken,
+      participantToken: participantToken,
       participantName: participantIdentity,
     };
-
-    // Return response with no-cache headers
-    return NextResponse.json(data, {
-      headers: {
-        'Cache-Control': 'no-store, must-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0'
-      }
+    const headers = new Headers({
+      "Cache-Control": "no-store",
     });
-
+    return NextResponse.json(data, { headers });
   } catch (error) {
-    console.error('Connection setup error:', error);
-    return NextResponse.json(
-      { error: 'Failed to establish connection' },
-      { status: 500 }
-    );
+    if (error instanceof Error) {
+      console.error(error);
+      return new NextResponse(error.message, { status: 500 });
+    }
   }
 }
 
 function createParticipantToken(
   userInfo: AccessTokenOptions,
   roomName: string
-): string {
-  // Create access token with 15-minute TTL
+) {
   const at = new AccessToken(API_KEY, API_SECRET, {
     ...userInfo,
     ttl: "15m",
   });
-
-  // Configure video/audio grants
   const grant: VideoGrant = {
     room: roomName,
     roomJoin: true,
@@ -91,7 +74,6 @@ function createParticipantToken(
     canPublishData: true,
     canSubscribe: true,
   };
-
   at.addGrant(grant);
   return at.toJwt();
 }

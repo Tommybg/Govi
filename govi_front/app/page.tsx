@@ -15,12 +15,19 @@ import type { ConnectionDetails } from "./api/connection-details/route";
 import { NoAgentNotification } from "./components/NoAgentNotification";
 import { CloseIcon } from "./components/CloseIcon";
 import { useKrispNoiseFilter } from "@livekit/components-react/krisp";
+import { MediaDeviceFailure } from "livekit-client";
 
 export default function Page() {
   const [connectionDetails, setConnectionDetails] = useState<ConnectionDetails | undefined>(undefined);
   const [agentState, setAgentState] = useState<AgentState>("disconnected");
   const [error, setError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
+
+  const handleMediaDeviceFailure = useCallback((failure?: MediaDeviceFailure) => {
+    console.error("Media device failure:", failure);
+    setError("Please allow microphone access to use the voice assistant");
+    setConnectionDetails(undefined);
+  }, []);
 
   const onConnectButtonClicked = useCallback(async () => {
     if (isConnecting) return;
@@ -29,8 +36,14 @@ export default function Page() {
       setIsConnecting(true);
       setError(null);
       
-      // Get connection details from the backend API
-      const response = await fetch(process.env.NEXT_PUBLIC_CONN_DETAILS_ENDPOINT!);
+      const endpoint = process.env.NEXT_PUBLIC_CONN_DETAILS_ENDPOINT;
+      if (!endpoint) {
+        throw new Error('Connection endpoint not configured');
+      }
+
+      console.log('Fetching from endpoint:', endpoint);
+      
+      const response = await fetch(endpoint);
       
       if (!response.ok) {
         const errorText = await response.text();
@@ -59,24 +72,6 @@ export default function Page() {
     }
   }, [isConnecting]);
 
-  const handleDisconnect = useCallback(() => {
-    console.log("Disconnected from room");
-    setConnectionDetails(undefined);
-    setError(null);
-  }, []);
-
-  const handleError = useCallback((error: Error) => {
-    console.error("LiveKit error:", error);
-    setError(error.message);
-    setConnectionDetails(undefined);
-  }, []);
-
-  const handleMediaDeviceFailure = useCallback((error: Error) => {
-    console.error("Media device failure:", error);
-    setError("Please allow microphone access to use the voice assistant");
-    setConnectionDetails(undefined);
-  }, []);
-
   return (
     <main className="flex min-h-screen flex-col items-center justify-between p-24 bg-gradient-to-r from-blue-900 to-blue-600">
       <LiveKitRoom
@@ -86,8 +81,16 @@ export default function Page() {
         audio={true}
         video={false}
         onMediaDeviceFailure={handleMediaDeviceFailure}
-        onDisconnected={handleDisconnect}
-        onError={handleError}
+        onDisconnected={() => {
+          console.log("Disconnected from room");
+          setConnectionDetails(undefined);
+          setError(null);
+        }}
+        onError={(error: Error) => {
+          console.error("LiveKit error:", error);
+          setError(error.message);
+          setConnectionDetails(undefined);
+        }}
         className="grid grid-rows-[2fr_1fr] items-center"
       >
         <SimpleVoiceAssistant onStateChange={setAgentState} />

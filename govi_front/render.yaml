@@ -1,16 +1,15 @@
 services:
   - type: web
-    name: govi-front
+    name: govi-frontend
     env: node
-    buildCommand: pnpm install && pnpm run build
-    startCommand: pnpm start
+    buildCommand: npm install && npm run build
+    startCommand: npm start
     envVars:
-      - key: NODE_ENV
-        value: production
       - key: NEXT_PUBLIC_API_URL
         value: https://govi.onrender.com
       - key: NEXT_PUBLIC_CONN_DETAILS_ENDPOINT
         value: https://govi.onrender.com/api/connection-details
       - key: NEXT_PUBLIC_WEBSOCKET_URL
         value: wss://govi.onrender.com
+    healthCheckPath: /api/health
     autoDeploy: true

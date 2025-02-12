@@ -1,6 +1,15 @@
+import {
+  AccessToken,
+  AccessTokenOptions,
+  VideoGrant,
+} from "livekit-server-sdk";
 import { NextResponse } from "next/server";
 
-// don't cache the results
+const API_KEY = process.env.LIVEKIT_API_KEY;
+const API_SECRET = process.env.LIVEKIT_API_SECRET;
+const LIVEKIT_URL = process.env.LIVEKIT_URL;
+
+// Don't cache results
 export const revalidate = 0;
 
 export type ConnectionDetails = {
@@ -12,47 +21,82 @@ export type ConnectionDetails = {
 
 export async function GET() {
   try {
-    const backendUrl = process.env.NEXT_PUBLIC_CONN_DETAILS_ENDPOINT;
-    
-    if (!backendUrl) {
-      throw new Error("Backend URL is not configured");
+    // Validate environment variables
+    if (!LIVEKIT_URL || !API_KEY || !API_SECRET) {
+      throw new Error("Missing required environment variables");
     }
 
-    // Forward the request to our backend
-    const response = await fetch(backendUrl, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
-      }
-    });
+    // Generate unique identifiers for room and participant
+    const participantIdentity = `voice_assistant_user_${Math.floor(Math.random() * 10_000)}`;
+    const roomName = `voice_assistant_room_${Math.floor(Math.random() * 10_000)}`;
 
-    if (!response.ok) {
-      throw new Error(`Backend responded with status: ${response.status}`);
-    }
-
-    const data = await response.json();
-
-    // Return connection details with CORS headers
-    return new NextResponse(JSON.stringify(data), {
-      headers: {
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-store',
-        'Access-Control-Allow-Origin': '*',
-      },
-    });
-  } catch (error) {
-    console.error('Connection details error:', error);
-    return new NextResponse(
-      JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }), 
+    // Create participant token with VAD metadata
+    const participantToken = await createParticipantToken(
       { 
-        status: 500,
-        headers: {
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-store',
-          'Access-Control-Allow-Origin': '*',
-        }
+        identity: participantIdentity,
+        // Add metadata for server-side VAD configuration
+        metadata: JSON.stringify({
+          serverVad: {
+            threshold: 0.6,
+            speakingTimeout: 500,
+            silenceTimeout: 500,
+            create_response: true
+          }
+        })
+      },
+      roomName,
+    );
+
+    // Prepare connection details
+    const data: ConnectionDetails = {
+      serverUrl: LIVEKIT_URL,
+      roomName,
+      participantToken,
+      participantName: participantIdentity,
+    };
+
+    // Return response with no-cache headers
+    return NextResponse.json(data, {
+      headers: {
+        'Cache-Control': 'no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
       }
+    });
+
+  } catch (error) {
+    console.error('Connection setup error:', error);
+    return NextResponse.json(
+      { error: 'Failed to establish connection' },
+      { status: 500 }
     );
   }
+}
+
+function createParticipantToken(
+  userInfo: AccessTokenOptions,
+  roomName: string
+): string {
+  // Create access token with 15-minute TTL
+  const at = new AccessToken(API_KEY, API_SECRET, {
+    ...userInfo,
+    ttl: "15m",
+  });
+
+  // Configure video/audio grants
+  const grant: VideoGrant = {
+    room: roomName,
+    roomJoin: true,
+    canPublish: true,
+    canPublishData: true,
+    canSubscribe: true,
+    // Enable real-time audio processing
+    canPublishSource: {
+      audio: true,
+      data: true
+    }
+  };
+
+  at.addGrant(grant);
+  return at.toJwt();
 }

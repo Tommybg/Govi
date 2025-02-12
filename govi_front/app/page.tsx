@@ -11,7 +11,6 @@ import {
   DisconnectButton,
 } from "@livekit/components-react";
 import { useCallback, useEffect, useState } from "react";
-import { MediaDeviceFailure } from "livekit-client";
 import type { ConnectionDetails } from "./api/connection-details/route";
 import { NoAgentNotification } from "./components/NoAgentNotification";
 import { CloseIcon } from "./components/CloseIcon";

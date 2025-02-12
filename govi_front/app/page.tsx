@@ -30,14 +30,9 @@ export default function Page() {
   }, []);
 
   const onConnectButtonClicked = useCallback(async () => {
-    // Generate room connection details, including:
-    //   - A random Room name
-    //   - A random Participant name
-    //   - An Access Token to permit the participant to join the room
-    //   - The URL of the LiveKit server to connect to
-    //
-    // In real-world application, you would likely allow the user to specify their
-    // own participant name, and possibly to choose from existing rooms to join.
+    if (isConnecting) return;
+
+    setIsConnecting(true);
 
     try {
       const url = new URL(
@@ -55,8 +50,10 @@ export default function Page() {
     } catch (error) {
       console.error('Error fetching connection details:', error);
       alert('Failed to initiate connection. Please try again.');
+    } finally {
+      setIsConnecting(false);
     }
-  }, []);
+  }, [isConnecting]);
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-between p-24 bg-gradient-to-r from-blue-900 to-blue-600">

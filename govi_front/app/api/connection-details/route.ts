@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
 
 // don't cache the results
 export const revalidate = 0;
@@ -11,7 +10,7 @@ export type ConnectionDetails = {
   participantToken: string;
 };
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     const backendUrl = process.env.NEXT_PUBLIC_CONN_DETAILS_ENDPOINT;
     

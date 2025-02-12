@@ -316,16 +316,14 @@ if __name__ == "__main__":
     # Create WorkerOptions with proper settings
     worker_options = WorkerOptions(
         entrypoint_fnc=entrypoint,
-        request_fnc=request_handler,  # Add request handler
+        request_fnc=request_handler,
         agent_name="govi",
         worker_type=WorkerType.ROOM,
         permissions=WorkerPermissions(
             can_publish=True,
             can_subscribe=True,
             hidden=False
-        ),
-        num_prewarm_processes=2,     # Control prewarmed processes
-        max_concurrent_jobs=4         # Limit concurrent jobs
+        )
     )
     
     # Add debug logging

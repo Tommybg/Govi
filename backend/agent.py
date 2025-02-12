@@ -7,18 +7,18 @@ from fastapi.responses import JSONResponse
 from dotenv import load_dotenv 
 from datetime import datetime
 
-from livekit import rtc, AccessToken
+from livekit import rtc
 from livekit.agents import (
     AutoSubscribe,
     JobContext,
     WorkerOptions,
-    cli,  # Important - we need this
+    cli,
     llm,
-    WorkerType  # Add this import
+    WorkerType
 )
 from livekit.agents.multimodal import MultimodalAgent
 from livekit.plugins import openai
-from typing import Dict  # Added Dict import
+from typing import Dict
 
 # Setup logging
 logging.basicConfig(level=logging.DEBUG)
@@ -223,7 +223,7 @@ def run_multimodal_agent(ctx: JobContext, participant: rtc.RemoteParticipant):
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
-@app.get("/api/connection-details")  # New endpoint
+@app.get("/api/connection-details")
 async def get_connection_details():
     try:
         # Get environment variables
@@ -241,25 +241,31 @@ async def get_connection_details():
         participant_identity = f"voice_assistant_user_{hash(str(os.urandom(8)))}"
         room_name = f"voice_assistant_room_{hash(str(os.urandom(8)))}"
 
-        # Create access token
-        at = AccessToken(api_key, api_secret)
-        grant = {
-            "room": room_name,
-            "roomJoin": True,
-            "canPublish": True,
-            "canPublishData": True,
-            "canSubscribe": True,
-        }
-        at.add_grant(grant)
+        # Create token using rtc.RoomServiceClient
+        room_client = rtc.RoomServiceClient(
+            livekit_url,
+            api_key,
+            api_secret
+        )
+
+        # Create join token
+        token = await room_client.create_token(
+            room=room_name,
+            identity=participant_identity,
+            can_publish=True,
+            can_subscribe=True,
+            can_publish_data=True
+        )
 
         # Return connection details
         return {
             "serverUrl": livekit_url,
             "roomName": room_name,
-            "participantToken": at.to_jwt(),
+            "participantToken": token,
             "participantName": participant_identity
         }
     except Exception as e:
+        logging.error(f"Error in get_connection_details: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

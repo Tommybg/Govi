@@ -91,10 +91,10 @@ function createParticipantToken(
     canPublishData: true,
     canSubscribe: true,
     // Enable real-time audio processing
-    canPublishSources: {
-      audio: true,
-      data: true
-    }
+    canPublishSources: [
+      { type: 'audio' }, // Specify audio track
+      { type: 'data' }   // Specify data track
+    ]
   };
 
   at.addGrant(grant);

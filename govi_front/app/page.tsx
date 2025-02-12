@@ -25,30 +25,47 @@ export default function Page() {
 
   const onConnectButtonClicked = useCallback(async () => {
     try {
-      console.log("Starting connection process...");
-      const url = new URL(
-        process.env.NEXT_PUBLIC_CONN_DETAILS_ENDPOINT ?? "/api/connection-details",
-        window.location.origin
-      );
-      console.log("Fetching from URL:", url.toString());
+      console.log('Starting connection process...');
       
-      const response = await fetch(url.toString());
+      // Use the complete URL from environment variable
+      const url = process.env.NEXT_PUBLIC_CONN_DETAILS_ENDPOINT;
+      
+      if (!url) {
+        throw new Error('Connection details endpoint not configured');
+      }
+      
+      console.log('Fetching from URL:', url);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+      });
+      
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorText = await response.text();
+        console.error('Response not OK:', {
+          status: response.status,
+          statusText: response.statusText,
+          errorText
+        });
+        throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
       }
       
-      const data = await response.json();
-      console.log("Connection details received:", data);
+      const connectionDetailsData = await response.json();
+      console.log('Connection details received:', connectionDetailsData);
       
-      if (data.error) {
-        throw new Error(data.error);
+      if (!connectionDetailsData.serverUrl || !connectionDetailsData.participantToken) {
+        console.error('Invalid connection details:', connectionDetailsData);
+        throw new Error('Invalid connection details received');
       }
       
-      updateConnectionDetails(data);
-      setError(null);
-    } catch (err) {
-      console.error("Connection error:", err);
-      setError(err instanceof Error ? err.message : "Connection failed");
+      updateConnectionDetails(connectionDetailsData);
+    } catch (error) {
+      console.error('Connection error details:', error);
+      alert(`Connection failed: ${error.message}`);
     }
   }, []);
 

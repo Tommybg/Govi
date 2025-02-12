@@ -1,7 +1,7 @@
 from __future__ import annotations
 import logging
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware 
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv 
@@ -14,10 +14,12 @@ from livekit.agents import (
     WorkerOptions,
     cli,  # Important - we need this
     llm,
-    WorkerType  # Add this import
+    WorkerType,  # Add this import
+    AccessToken  # Added AccessToken import
 )
 from livekit.agents.multimodal import MultimodalAgent
 from livekit.plugins import openai
+from typing import Dict  # Added Dict import
 
 # Setup logging
 logging.basicConfig(level=logging.DEBUG)
@@ -221,6 +223,45 @@ def run_multimodal_agent(ctx: JobContext, participant: rtc.RemoteParticipant):
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
+@app.get("/api/connection-details")  # New endpoint
+async def get_connection_details():
+    try:
+        # Get environment variables
+        api_key = os.getenv("LIVEKIT_API_KEY")
+        api_secret = os.getenv("LIVEKIT_API_SECRET")
+        livekit_url = os.getenv("LIVEKIT_URL")
+
+        if not all([api_key, api_secret, livekit_url]):
+            raise HTTPException(
+                status_code=500,
+                detail="Missing required environment variables"
+            )
+
+        # Generate participant identity and room name
+        participant_identity = f"voice_assistant_user_{hash(str(os.urandom(8)))}"
+        room_name = f"voice_assistant_room_{hash(str(os.urandom(8)))}"
+
+        # Create access token
+        at = AccessToken(api_key, api_secret)
+        grant = {
+            "room": room_name,
+            "roomJoin": True,
+            "canPublish": True,
+            "canPublishData": True,
+            "canSubscribe": True,
+        }
+        at.add_grant(grant)
+
+        # Return connection details
+        return {
+            "serverUrl": livekit_url,
+            "roomName": room_name,
+            "participantToken": at.to_jwt(),
+            "participantName": participant_identity
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     # Create WorkerOptions with proper enum value

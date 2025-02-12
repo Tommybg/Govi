@@ -46,7 +46,7 @@ export default function Page() {
       }
 
       const connectionDetailsData = await response.json();
-      updateConnectionDetails(connectionDetailsData);
+      setConnectionDetails(connectionDetailsData);
     } catch (error) {
       console.error('Error fetching connection details:', error);
       alert('Failed to initiate connection. Please try again.');

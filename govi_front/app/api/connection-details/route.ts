@@ -1,14 +1,5 @@
-import {
-  AccessToken,
-  AccessTokenOptions,
-  VideoGrant,
-} from "livekit-server-sdk";
 import { NextResponse } from "next/server";
-
-// NOTE: you are expected to define the following environment variables in `.env.local`:
-const API_KEY = process.env.LIVEKIT_API_KEY;
-const API_SECRET = process.env.LIVEKIT_API_SECRET;
-const LIVEKIT_URL = process.env.LIVEKIT_URL;
+import type { NextRequest } from "next/server";
 
 // don't cache the results
 export const revalidate = 0;
@@ -20,67 +11,49 @@ export type ConnectionDetails = {
   participantToken: string;
 };
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    if (LIVEKIT_URL === undefined) {
-      throw new Error("LIVEKIT_URL is not defined");
-    }
-    if (API_KEY === undefined) {
-      throw new Error("LIVEKIT_API_KEY is not defined");
-    }
-    if (API_SECRET === undefined) {
-      throw new Error("LIVEKIT_API_SECRET is not defined");
+    const backendUrl = process.env.NEXT_PUBLIC_CONN_DETAILS_ENDPOINT;
+    
+    if (!backendUrl) {
+      throw new Error("Backend URL is not configured");
     }
 
-    // Generate participant token with additional permissions
-    const participantIdentity = `voice_assistant_user_${Math.floor(Math.random() * 10_000)}`;
-    const roomName = `voice_assistant_room_${Math.floor(Math.random() * 10_000)}`;
-    const participantToken = await createParticipantToken(
-      { 
-        identity: participantIdentity,
-        metadata: JSON.stringify({
-          serverVad: {
-            create_response: true  // Changed from camelCase to snake_case and vad to serverVad
-          }
-        })
-      },
-      roomName,
-    );
-
-    // Return connection details
-    const data: ConnectionDetails = {
-      serverUrl: LIVEKIT_URL,
-      roomName,
-      participantToken: participantToken,
-      participantName: participantIdentity,
-    };
-    const headers = new Headers({
-      "Cache-Control": "no-store",
+    // Forward the request to our backend
+    const response = await fetch(backendUrl, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      }
     });
-    return NextResponse.json(data, { headers });
-  } catch (error) {
-    if (error instanceof Error) {
-      console.error(error);
-      return new NextResponse(error.message, { status: 500 });
-    }
-  }
-}
 
-function createParticipantToken(
-  userInfo: AccessTokenOptions,
-  roomName: string
-) {
-  const at = new AccessToken(API_KEY, API_SECRET, {
-    ...userInfo,
-    ttl: "15m",
-  });
-  const grant: VideoGrant = {
-    room: roomName,
-    roomJoin: true,
-    canPublish: true,
-    canPublishData: true,
-    canSubscribe: true,
-  };
-  at.addGrant(grant);
-  return at.toJwt();
+    if (!response.ok) {
+      throw new Error(`Backend responded with status: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    // Return connection details with CORS headers
+    return new NextResponse(JSON.stringify(data), {
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store',
+        'Access-Control-Allow-Origin': '*',
+      },
+    });
+  } catch (error) {
+    console.error('Connection details error:', error);
+    return new NextResponse(
+      JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }), 
+      { 
+        status: 500,
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+          'Access-Control-Allow-Origin': '*',
+        }
+      }
+    );
+  }
 }

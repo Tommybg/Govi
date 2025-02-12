@@ -20,81 +20,44 @@ export default function Page() {
   const [connectionDetails, setConnectionDetails] = useState<ConnectionDetails | undefined>(undefined);
   const [agentState, setAgentState] = useState<AgentState>("disconnected");
   const [error, setError] = useState<string | null>(null);
+  const [isConnecting, setIsConnecting] = useState(false);
 
   const onConnectButtonClicked = useCallback(async () => {
+    if (isConnecting) return;
+    
     try {
-      console.log('Starting connection process...');
+      setIsConnecting(true);
+      setError(null);
       
-      const url = process.env.NEXT_PUBLIC_CONN_DETAILS_ENDPOINT;
-      
-      if (!url) {
-        throw new Error('Connection details endpoint not configured');
-      }
-      
-      console.log('Fetching from URL:', url);
-      
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-        },
-      });
+      // Get connection details from our local API route
+      const response = await fetch('/api/connection-details');
       
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('Response not OK:', {
-          status: response.status,
-          statusText: response.statusText,
-          errorText
-        });
-        throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
+        throw new Error(`Failed to get connection details: ${errorText}`);
       }
       
-      const connectionDetailsData = await response.json();
-      console.log('Connection details received:', connectionDetailsData);
+      const data = await response.json();
       
-      if (!connectionDetailsData.serverUrl || !connectionDetailsData.participantToken) {
-        console.error('Invalid connection details:', connectionDetailsData);
+      if (!data.serverUrl || !data.participantToken) {
         throw new Error('Invalid connection details received');
       }
       
-      setConnectionDetails(connectionDetailsData);
-    } catch (error: any) {
-      console.error('Connection error details:', error);
-      setError(error.message || 'Failed to connect');
-    }
-  }, []);
-
-  const startAgent = useCallback(async () => {
-    try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-      if (!apiUrl) {
-        console.warn("NEXT_PUBLIC_API_URL not set, skipping agent start");
-        return;
-      }
-
-      console.log("Starting agent at:", apiUrl);
-      const response = await fetch(`${apiUrl}/start-worker`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" }
+      console.log('Connecting with details:', {
+        serverUrl: data.serverUrl,
+        roomName: data.roomName,
+        participantName: data.participantName
       });
-
-      if (!response.ok) {
-        throw new Error(`Failed to start agent: ${response.status}`);
-      }
-
-      const data = await response.json();
-      console.log("Agent started successfully:", data);
-    } catch (error: any) {
-      console.error("Error starting agent:", error);
-      setError(error.message || "Failed to start agent");
+      
+      setConnectionDetails(data);
+      
+    } catch (error) {
+      console.error('Connection error:', error);
+      setError(error instanceof Error ? error.message : 'Failed to connect');
+    } finally {
+      setIsConnecting(false);
     }
-  }, []);
-
-  useEffect(() => {
-    startAgent();
-  }, [startAgent]);
+  }, [isConnecting]);
 
   const handleDisconnect = useCallback(() => {
     console.log("Disconnected from room");
@@ -105,11 +68,13 @@ export default function Page() {
   const handleError = useCallback((error: Error) => {
     console.error("LiveKit error:", error);
     setError(error.message);
+    setConnectionDetails(undefined);
   }, []);
 
   const handleMediaDeviceFailure = useCallback((error: Error) => {
     console.error("Media device failure:", error);
-    setError("Failed to access microphone");
+    setError("Please allow microphone access to use the voice assistant");
+    setConnectionDetails(undefined);
   }, []);
 
   return (
@@ -129,12 +94,13 @@ export default function Page() {
         <ControlBar
           onConnectButtonClicked={onConnectButtonClicked}
           agentState={agentState}
+          isConnecting={isConnecting}
         />
         <RoomAudioRenderer />
         <NoAgentNotification state={agentState} />
         
         {error && (
-          <div className="fixed top-4 left-1/2 transform -translate-x-1/2 bg-red-500 text-white px-4 py-2 rounded-md shadow-lg">
+          <div className="fixed top-4 left-1/2 transform -translate-x-1/2 bg-red-500 text-white px-4 py-2 rounded-md shadow-lg z-50">
             {error}
             <button 
               onClick={() => setError(null)}
@@ -174,11 +140,11 @@ function SimpleVoiceAssistant(props: {
 function ControlBar(props: {
   onConnectButtonClicked: () => void;
   agentState: AgentState;
+  isConnecting: boolean;
 }) {
   const krisp = useKrispNoiseFilter();
   
   useEffect(() => {
-    // Fixed dependency warning
     if (krisp) {
       krisp.setNoiseFilterEnabled(true);
     }
@@ -193,10 +159,13 @@ function ControlBar(props: {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0, top: "-10px" }}
             transition={{ duration: 1, ease: [0.09, 1.04, 0.245, 1.055] }}
-            className="uppercase absolute left-1/2 -translate-x-1/2 px-4 py-2 bg-gradient-to-r from-white-500 to-white-300 text-white rounded-md"
-            onClick={() => props.onConnectButtonClicked()}
+            className={`uppercase absolute left-1/2 -translate-x-1/2 px-4 py-2 bg-gradient-to-r from-white-500 to-white-300 text-white rounded-md ${
+              props.isConnecting ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
+            onClick={props.onConnectButtonClicked}
+            disabled={props.isConnecting}
           >
-            Inicia Ahora
+            {props.isConnecting ? 'Conectando...' : 'Inicia Ahora'}
           </motion.button>
         )}
       </AnimatePresence>
